@@ -39,11 +39,27 @@ class ScraperResponse:
 
 class TLSClient:
     """
-    High-performance request client using curl_cffi to impersonate
-    browser TLS signatures and HTTP/2 characteristics.
+    High-performance request client using curl_cffi to impersonate browser TLS
+    signatures. A single AsyncSession is created lazily and reused for keep-alive
+    and cookie persistence across requests.
     """
-    def __init__(self, impersonate: str = config.DEFAULT_CHROME_VERSION):
+    def __init__(self, impersonate: str = config.DEFAULT_CHROME_VERSION, session_factory=None):
         self.impersonate = impersonate
+        self._session_factory = session_factory or (lambda: AsyncSession(impersonate=self.impersonate))
+        self._session = None
+
+    def _get_session(self):
+        if self._session is None:
+            self._session = self._session_factory()
+        return self._session
+
+    async def aclose(self):
+        if self._session is not None:
+            try:
+                await self._session.close()
+            except Exception:
+                pass
+            self._session = None
 
     @retry_async(max_retries=config.MAX_RETRIES, exceptions=(ScraperError,), base_delay=config.BACKOFF_FACTOR)
     async def _fetch_raw(
@@ -58,46 +74,46 @@ class TLSClient:
         proxy: Optional[str] = None
     ) -> ScraperResponse:
         logger.info(f"TLS Mode -> Requesting: {url} (Method: {method})")
-        
+
         req_headers = {**config.DEFAULT_HEADERS, **(headers or {})}
         proxies = {"http": proxy, "https": proxy} if proxy else None
 
         try:
-            async with AsyncSession(impersonate=self.impersonate) as session:
-                response = await session.request(
-                    method=method,
-                    url=url,
-                    headers=req_headers,
-                    cookies=cookies,
-                    data=data,
-                    json=json,
-                    timeout=timeout,
-                    proxies=proxies
-                )
-                
-                # Check status
-                if response.status_code >= 500:
-                    raise ScraperRequestError(f"Server Error status code: {response.status_code}")
-                elif response.status_code >= 400:
-                    # e.g., 403 Forbidden might indicate a silent block
-                    challenge_res = check_bot_challenges(response.text, url, status_code=response.status_code, headers=dict(response.headers))
-                    if challenge_res["blocked"]:
-                        raise ScraperBlockError(f"Anti-bot blocked ({challenge_res['system']}): {challenge_res['reason']}")
-                    raise ScraperRequestError(f"Client Error status code: {response.status_code}")
+            session = self._get_session()
+            response = await session.request(
+                method=method,
+                url=url,
+                headers=req_headers,
+                cookies=cookies,
+                data=data,
+                json=json,
+                timeout=timeout,
+                proxies=proxies
+            )
 
-                # Check anti-bot challenges on 200 responses (common for Cloudflare walls)
+            # Check status
+            if response.status_code >= 500:
+                raise ScraperRequestError(f"Server Error status code: {response.status_code}")
+            elif response.status_code >= 400:
+                # e.g., 403 Forbidden might indicate a silent block
                 challenge_res = check_bot_challenges(response.text, url, status_code=response.status_code, headers=dict(response.headers))
                 if challenge_res["blocked"]:
                     raise ScraperBlockError(f"Anti-bot blocked ({challenge_res['system']}): {challenge_res['reason']}")
+                raise ScraperRequestError(f"Client Error status code: {response.status_code}")
 
-                return ScraperResponse(
-                    status_code=response.status_code,
-                    text=response.text,
-                    url=str(response.url),
-                    headers=dict(response.headers),
-                    cookies=response.cookies.get_dict(),
-                    success=True
-                )
+            # Check anti-bot challenges on 200 responses (common for Cloudflare walls)
+            challenge_res = check_bot_challenges(response.text, url, status_code=response.status_code, headers=dict(response.headers))
+            if challenge_res["blocked"]:
+                raise ScraperBlockError(f"Anti-bot blocked ({challenge_res['system']}): {challenge_res['reason']}")
+
+            return ScraperResponse(
+                status_code=response.status_code,
+                text=response.text,
+                url=str(response.url),
+                headers=dict(response.headers),
+                cookies=response.cookies.get_dict(),
+                success=True
+            )
         except ScraperError:
             # Re-raise to let retry decorator capture it
             raise
@@ -164,11 +180,11 @@ class BrowserClient:
                 "--window-size=1920,1080",
             ]
         )
-        
+
         # Convert proxy to Playwright format if exists
         from src.proxies import parse_to_playwright
         pw_proxy = parse_to_playwright(self.proxy) if self.proxy else None
-        
+
         self.context = await self.browser.new_context(
             viewport=config.PLAYWRIGHT_VIEWPORT,
             user_agent=config.DEFAULT_USER_AGENT,
@@ -189,7 +205,7 @@ class BrowserClient:
     ) -> ScraperResponse:
         if not self.browser or not self.context:
             await self.start()
-        
+
         logger.info(f"Browser Mode -> Navigating to: {url}")
         page: Optional[Page] = None
         try:
@@ -199,13 +215,13 @@ class BrowserClient:
                 wait_until=wait_until,
                 timeout=timeout * 1000
             )
-            
+
             status = response.status if response else 200
             if status >= 500:
                 raise ScraperRequestError(f"Server Error status code: {status}")
-            
+
             content = await page.content()
-            
+
             # Check bot challenge blocks
             res_headers_for_check = await response.all_headers() if response else {}
             challenge_res = check_bot_challenges(
@@ -213,7 +229,7 @@ class BrowserClient:
             )
             if challenge_res["blocked"]:
                 raise ScraperBlockError(f"Anti-bot blocked ({challenge_res['system']}): {challenge_res['reason']}")
-                
+
             if status >= 400:
                 raise ScraperRequestError(f"Client Error status code: {status}")
 
