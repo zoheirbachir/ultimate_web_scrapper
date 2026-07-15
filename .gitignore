@@ -5,5 +5,7 @@ __pycache__/
 exports/
 *.db
 .env
+.env*.local
 node_modules/
 .next/
+next-env.d.ts
