@@ -3,7 +3,10 @@ import logging
 from dataclasses import dataclass
 from typing import Dict, Any, Optional
 from curl_cffi.requests import AsyncSession
-from playwright.async_api import async_playwright, Browser, BrowserContext, Page
+try:
+    from patchright.async_api import async_playwright, Browser, BrowserContext, Page
+except ImportError:  # fallback if patchright is unavailable
+    from playwright.async_api import async_playwright, Browser, BrowserContext, Page
 
 from src import config
 from src.utils import retry_async, check_bot_challenges
@@ -169,10 +172,31 @@ class TLSClient:
                                success=False, error_message=str(last_error))
 
 
+def build_persistent_context_kwargs(headless: bool, proxy: Optional[str] = None) -> Dict[str, Any]:
+    """Assemble launch_persistent_context kwargs from stealth config (pure function)."""
+    kwargs: Dict[str, Any] = {
+        "user_data_dir": config.USER_DATA_DIR,
+        "channel": config.BROWSER_CHANNEL,
+        "headless": headless,
+        "locale": config.PLAYWRIGHT_LOCALE,
+        "timezone_id": config.PLAYWRIGHT_TIMEZONE,
+        "color_scheme": config.PLAYWRIGHT_COLOR_SCHEME,
+        "viewport": config.PLAYWRIGHT_VIEWPORT,
+        "args": list(config.BROWSER_LAUNCH_ARGS),   # deliberately empty
+    }
+    if proxy:
+        from src.proxies import parse_to_playwright
+        pw_proxy = parse_to_playwright(proxy)
+        if pw_proxy:
+            kwargs["proxy"] = pw_proxy
+    return kwargs
+
+
 class BrowserClient:
     """
-    Playwright-based browser client for dynamic dynamic scraping
-    and heavy interactive tasks.
+    patchright-based browser client for dynamic scraping and heavy interactive
+    tasks. Uses a persistent context so the profile looks like a real user; stealth
+    is handled at the CDP level by patchright (no injected JS evasion script).
     """
     def __init__(self, headless: bool = config.PLAYWRIGHT_HEADLESS, proxy: Optional[str] = None):
         self.headless = headless
@@ -182,33 +206,11 @@ class BrowserClient:
         self.context: Optional[BrowserContext] = None
 
     async def start(self):
-        logger.info("Initializing Playwright Browser Client...")
+        logger.info("Initializing patchright persistent browser context...")
         self.playwright = await async_playwright().start()
-        self.browser = await self.playwright.chromium.launch(
-            headless=self.headless,
-            args=[
-                "--disable-blink-features=AutomationControlled",
-                "--disable-infobars",
-                "--no-sandbox",
-                "--disable-setuid-sandbox",
-                "--window-size=1920,1080",
-            ]
-        )
-
-        # Convert proxy to Playwright format if exists
-        from src.proxies import parse_to_playwright
-        pw_proxy = parse_to_playwright(self.proxy) if self.proxy else None
-
-        self.context = await self.browser.new_context(
-            viewport=config.PLAYWRIGHT_VIEWPORT,
-            user_agent=config.DEFAULT_USER_AGENT,
-            locale=config.PLAYWRIGHT_LOCALE,
-            color_scheme=config.PLAYWRIGHT_COLOR_SCHEME,
-            proxy=pw_proxy
-        )
-        # Prevent webdriver and other bot detection mechanisms
-        from src.stealth import get_evasion_script
-        await self.context.add_init_script(get_evasion_script())
+        kwargs = build_persistent_context_kwargs(self.headless, self.proxy)
+        self.context = await self.playwright.chromium.launch_persistent_context(**kwargs)
+        self.browser = self.context.browser  # may be None for persistent contexts
 
     @retry_async(max_retries=config.MAX_RETRIES, exceptions=(ScraperError,), base_delay=config.BACKOFF_FACTOR)
     async def _fetch_raw(
@@ -294,8 +296,6 @@ class BrowserClient:
     async def stop(self):
         if self.context:
             await self.context.close()
-        if self.browser:
-            await self.browser.close()
         if self.playwright:
             await self.playwright.stop()
-        logger.info("Playwright Browser Client Stopped.")
+        logger.info("patchright Browser Client Stopped.")
