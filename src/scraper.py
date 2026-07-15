@@ -80,13 +80,13 @@ class TLSClient:
                     raise ScraperRequestError(f"Server Error status code: {response.status_code}")
                 elif response.status_code >= 400:
                     # e.g., 403 Forbidden might indicate a silent block
-                    challenge_res = check_bot_challenges(response.text, url)
+                    challenge_res = check_bot_challenges(response.text, url, status_code=response.status_code, headers=dict(response.headers))
                     if challenge_res["blocked"]:
                         raise ScraperBlockError(f"Anti-bot blocked ({challenge_res['system']}): {challenge_res['reason']}")
                     raise ScraperRequestError(f"Client Error status code: {response.status_code}")
 
                 # Check anti-bot challenges on 200 responses (common for Cloudflare walls)
-                challenge_res = check_bot_challenges(response.text, url)
+                challenge_res = check_bot_challenges(response.text, url, status_code=response.status_code, headers=dict(response.headers))
                 if challenge_res["blocked"]:
                     raise ScraperBlockError(f"Anti-bot blocked ({challenge_res['system']}): {challenge_res['reason']}")
 
@@ -207,7 +207,10 @@ class BrowserClient:
             content = await page.content()
             
             # Check bot challenge blocks
-            challenge_res = check_bot_challenges(content, url)
+            res_headers_for_check = await response.all_headers() if response else {}
+            challenge_res = check_bot_challenges(
+                content, url, status_code=status, headers=res_headers_for_check
+            )
             if challenge_res["blocked"]:
                 raise ScraperBlockError(f"Anti-bot blocked ({challenge_res['system']}): {challenge_res['reason']}")
                 

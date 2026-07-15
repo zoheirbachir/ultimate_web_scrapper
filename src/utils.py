@@ -41,7 +41,7 @@ def retry_async(
                             f"Final Error: {e}"
                         )
                         break
-                        
+
                     delay = calculate_backoff(attempt, base_delay, max_delay)
                     logger.warning(
                         f"Exception caught in {func.__name__}: {e}. "
@@ -72,67 +72,76 @@ class RateLimiter:
 
 # --- Anti-Bot & Bot Challenge Signatures ---
 
-CLOUDFLARE_SIGNATURES = [
+# Cloudflare: challenge page <title> text (returned even with HTTP 200 on JS challenge)
+CLOUDFLARE_TITLE_MARKERS = [
     "attention required! | cloudflare",
-    "cf-browser-verification",
-    "cf-cookie-error",
-    "challenge-form",
-    "turnstile",
-    "cf-challenge"
+    "just a moment...",
+    "checking your browser before accessing",
 ]
-
-DATADOME_SIGNATURES = [
-    "datadome",
-    "ddjs",
-    "captcha.datadome.co"
+# Cloudflare: challenge-platform script hosts (strong, low-false-positive signal)
+CLOUDFLARE_SCRIPT_MARKERS = [
+    "challenges.cloudflare.com/turnstile",
+    "/cdn-cgi/challenge-platform/",
 ]
-
-AKAMAI_SIGNATURES = [
-    "sec-cpt",
-    "akamai-bot",
-    "akamai_captcha"
+# DataDome infrastructure hosts
+DATADOME_MARKERS = [
+    "geo.captcha-delivery.com",
+    "captcha.datadome.co",
+    "js.datadome.co",
 ]
-
-CAPTCHA_SIGNATURES = [
-    "captcha",
-    "recaptcha",
+# Akamai Bot Manager challenge markers
+AKAMAI_MARKERS = [
+    "/_sec/cp_challenge/",
+    "ak_bmsc",
+]
+# Generic CAPTCHA widgets — ONLY treated as a block when the response is also a
+# challenge status, to avoid flagging normal pages that embed a captcha (e.g. logins).
+GENERIC_CAPTCHA_MARKERS = [
     "g-recaptcha",
-    "hcaptcha",
-    "robot check",
-    "please confirm you are a human"
+    "h-captcha",
+    "hcaptcha.com/captcha",
+    "www.google.com/recaptcha/api",
 ]
+CHALLENGE_STATUS_CODES = {401, 403, 429, 503}
 
-def check_bot_challenges(html_content: str, url: str) -> Dict[str, Any]:
+
+def _blocked(system: str, reason: str, url: str) -> Dict[str, Any]:
+    logger.warning(f"{system} challenge detected at {url}: {reason}")
+    return {"blocked": True, "system": system, "reason": reason}
+
+
+def check_bot_challenges(
+    html_content: str,
+    url: str,
+    status_code: int = 200,
+    headers: Dict[str, str] = None,
+) -> Dict[str, Any]:
     """
-    Inspects HTML content to check if requests triggered bot challenge blocks or captcha screens.
+    Detect anti-bot / challenge responses using precise infrastructure markers,
+    challenge-page titles, response headers, and status code — NOT loose body
+    substrings. Backward-compatible: callers may pass only (html_content, url).
     """
-    if not html_content:
-        return {"blocked": False, "system": None, "reason": None}
-        
-    html_lower = html_content.lower()
-    
-    # 1. Cloudflare Check
-    for sig in CLOUDFLARE_SIGNATURES:
-        if sig in html_lower:
-            logger.error(f"Cloudflare block challenge detected at url: {url}")
-            return {"blocked": True, "system": "Cloudflare", "reason": f"Matched signature: {sig}"}
-            
-    # 2. DataDome Check
-    for sig in DATADOME_SIGNATURES:
-        if sig in html_lower:
-            logger.error(f"DataDome block challenge detected at url: {url}")
-            return {"blocked": True, "system": "DataDome", "reason": f"Matched signature: {sig}"}
-            
-    # 3. Akamai Check
-    for sig in AKAMAI_SIGNATURES:
-        if sig in html_lower:
-            logger.error(f"Akamai block challenge detected at url: {url}")
-            return {"blocked": True, "system": "Akamai", "reason": f"Matched signature: {sig}"}
-            
-    # 4. Generic Captchas
-    for sig in CAPTCHA_SIGNATURES:
-        if sig in html_lower:
-            logger.error(f"Generic bot blocker/CAPTCHA page detected at url: {url}")
-            return {"blocked": True, "system": "Generic CAPTCHA", "reason": f"Matched signature: {sig}"}
-            
+    html_lower = (html_content or "").lower()
+    hdrs = {k.lower(): (v or "").lower() for k, v in (headers or {}).items()}
+
+    # 1. Cloudflare — header, then script host, then challenge title.
+    if hdrs.get("cf-mitigated") == "challenge":
+        return _blocked("Cloudflare", "cf-mitigated: challenge header", url)
+    if any(m in html_lower for m in CLOUDFLARE_SCRIPT_MARKERS):
+        return _blocked("Cloudflare", "challenge-platform script present", url)
+    if any(m in html_lower for m in CLOUDFLARE_TITLE_MARKERS):
+        return _blocked("Cloudflare", "challenge page title", url)
+
+    # 2. DataDome — infrastructure hosts.
+    if any(m in html_lower for m in DATADOME_MARKERS):
+        return _blocked("DataDome", "DataDome infrastructure host present", url)
+
+    # 3. Akamai — challenge path / cookie marker.
+    if any(m in html_lower for m in AKAMAI_MARKERS):
+        return _blocked("Akamai", "Akamai Bot Manager marker present", url)
+
+    # 4. Generic CAPTCHA widgets — only when the response itself is a challenge status.
+    if status_code in CHALLENGE_STATUS_CODES and any(m in html_lower for m in GENERIC_CAPTCHA_MARKERS):
+        return _blocked("Generic CAPTCHA", f"captcha widget on {status_code} response", url)
+
     return {"blocked": False, "system": None, "reason": None}
