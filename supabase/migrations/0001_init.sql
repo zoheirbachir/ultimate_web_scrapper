@@ -115,3 +115,21 @@ begin
         alter publication supabase_realtime add table public.profiles;
     end if;
 end$$;
+
+-- ─────────────────────────────────────────────────────────────────────────────
+-- Atomic counters — called by the backend so concurrent result writes within one
+-- job never lose an increment (avoids read-modify-write races).
+-- ─────────────────────────────────────────────────────────────────────────────
+
+create or replace function public.bump_job_progress(p_job_id uuid, p_ok boolean)
+returns void language sql as $$
+    update public.jobs
+       set completed = completed + (case when p_ok then 1 else 0 end),
+           failed    = failed    + (case when p_ok then 0 else 1 end)
+     where id = p_job_id;
+$$;
+
+create or replace function public.increment_usage(p_user_id uuid, p_n integer)
+returns void language sql as $$
+    update public.profiles set usage_count = usage_count + p_n where id = p_user_id;
+$$;

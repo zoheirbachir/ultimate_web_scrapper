@@ -44,6 +44,8 @@ frontend and out of version control — treat them like passwords.
 ```
 cd backend
 python -m pip install -r requirements.txt
-python -m uvicorn app.main:app --reload --port 8000
+python -m uvicorn "app.main:create_production_app" --factory --reload --port 8000
 ```
-Then open http://localhost:8000/docs for the interactive API.
+Then open http://localhost:8000/docs for the interactive API. (The `--factory` flag
+tells uvicorn to call `create_production_app()`, which reads your `.env` and connects
+to Supabase.)

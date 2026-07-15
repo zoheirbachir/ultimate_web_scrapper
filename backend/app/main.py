@@ -39,3 +39,25 @@ def create_app(store, runner, settings) -> FastAPI:
         return {"status": "ok"}
 
     return app
+
+
+def create_production_app() -> FastAPI:
+    """Build the real app from environment settings. Run with:
+        uvicorn "app.main:create_production_app" --factory --port 8000
+    """
+    from supabase import create_client
+
+    from app.config import get_settings
+    from app.services.runner import JobRunner
+    from app.services.supabase_store import SupabaseStore
+
+    settings = get_settings()
+    if not settings.supabase_url or not settings.supabase_service_role_key:
+        raise RuntimeError(
+            "Supabase not configured. Copy backend/.env.example to backend/.env and fill "
+            "in SUPABASE_URL and SUPABASE_SERVICE_ROLE_KEY (see docs/SUPABASE_SETUP.md)."
+        )
+    client = create_client(settings.supabase_url, settings.supabase_service_role_key)
+    store = SupabaseStore(client)
+    runner = JobRunner(store, max_concurrent_jobs=settings.max_concurrent_jobs)
+    return create_app(store=store, runner=runner, settings=settings)
