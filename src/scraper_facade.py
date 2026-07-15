@@ -1,4 +1,5 @@
 import asyncio
+import inspect
 import logging
 from dataclasses import dataclass, field
 from typing import Callable, Dict, Any, List, Optional
@@ -54,7 +55,8 @@ class Scraper:
         return {"url": url, "status": "ok", "error": None, "data": parsed["data"]}
 
     async def run(self, cfg: ScrapeConfig,
-                  progress_cb: Optional[Callable[[int, int], None]] = None) -> List[Dict[str, Any]]:
+                  progress_cb: Optional[Callable[[int, int], None]] = None,
+                  result_cb: Optional[Callable[[Dict[str, Any]], Any]] = None) -> List[Dict[str, Any]]:
         total = len(cfg.urls)
         results: List[Optional[Dict[str, Any]]] = [None] * total
         limiter = RateLimiter(cfg.rate_per_minute)
@@ -70,6 +72,10 @@ class Scraper:
                     results[i] = await self._scrape_one(url, cfg)
                 except Exception as e:  # never let one URL kill the batch
                     results[i] = {"url": url, "status": "failed", "error": str(e), "data": None}
+            if result_cb is not None:
+                maybe = result_cb(results[i])
+                if inspect.isawaitable(maybe):
+                    await maybe
             async with done_lock:
                 done += 1
                 if progress_cb:

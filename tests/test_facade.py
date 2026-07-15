@@ -54,3 +54,22 @@ async def test_facade_runs_all_urls_with_fallback_and_progress():
     assert by_url["http://x.com/fail"]["status"] == "ok"
     assert by_url["http://x.com/fail"]["data"]["t"] == "FROM_BROWSER"
     assert progress[-1] == (2, 2)  # final progress reports all done
+
+
+@pytest.mark.asyncio
+async def test_facade_invokes_result_cb_per_url():
+    seen = []
+
+    async def on_result(r):
+        seen.append(r["url"])
+
+    cfg = ScrapeConfig(
+        urls=["http://x.com/a", "http://x.com/b"],
+        mode="custom",
+        fields={"t": {"selector": "h1.t"}},
+        concurrency=2,
+        rate_per_minute=6000,
+    )
+    scraper = Scraper(tls_client=FakeTLS(), browser_client=FakeBrowser())
+    await scraper.run(cfg, result_cb=on_result)
+    assert sorted(seen) == ["http://x.com/a", "http://x.com/b"]
