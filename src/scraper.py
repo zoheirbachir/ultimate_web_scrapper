@@ -43,10 +43,13 @@ class TLSClient:
     signatures. A single AsyncSession is created lazily and reused for keep-alive
     and cookie persistence across requests.
     """
-    def __init__(self, impersonate: str = config.DEFAULT_CHROME_VERSION, session_factory=None):
+    def __init__(self, impersonate: str = config.DEFAULT_CHROME_VERSION,
+                 session_factory=None, rotator=None, ua_pool=None):
         self.impersonate = impersonate
         self._session_factory = session_factory or (lambda: AsyncSession(impersonate=self.impersonate))
         self._session = None
+        self.rotator = rotator
+        self.ua_pool = ua_pool or list(config.USER_AGENT_POOL)
 
     def _get_session(self):
         if self._session is None:
@@ -61,7 +64,6 @@ class TLSClient:
                 pass
             self._session = None
 
-    @retry_async(max_retries=config.MAX_RETRIES, exceptions=(ScraperError,), base_delay=config.BACKOFF_FACTOR)
     async def _fetch_raw(
         self,
         url: str,
@@ -131,28 +133,40 @@ class TLSClient:
         timeout: float = config.DEFAULT_TIMEOUT,
         proxy: Optional[str] = None
     ) -> ScraperResponse:
-        """Fetch wrapper wrapping retries internally to avoid throwing uncaught errors."""
-        try:
-            return await self._fetch_raw(
-                url=url,
-                method=method,
-                headers=headers,
-                cookies=cookies,
-                data=data,
-                json=json,
-                timeout=timeout,
-                proxy=proxy
-            )
-        except Exception as e:
-            return ScraperResponse(
-                status_code=0,
-                text="",
-                url=url,
-                headers={},
-                cookies={},
-                success=False,
-                error_message=str(e)
-            )
+        """Fetch with a rotation-aware retry loop. On an anti-bot block, the current
+        proxy is marked failed and proxy + user-agent are rotated before retrying."""
+        import random
+        from src.utils import calculate_backoff
+        last_error = None
+        current_proxy = proxy or (self.rotator.get_proxy() if self.rotator else None)
+        for attempt in range(config.MAX_RETRIES + 1):
+            req_headers = dict(headers or {})
+            if self.ua_pool:
+                req_headers.setdefault("User-Agent", random.choice(self.ua_pool))
+            try:
+                res = await self._fetch_raw(
+                    url, method=method, headers=req_headers, cookies=cookies,
+                    data=data, json=json, timeout=timeout, proxy=current_proxy
+                )
+                if self.rotator and current_proxy:
+                    self.rotator.mark_success(current_proxy)
+                return res
+            except ScraperBlockError as e:
+                last_error = e
+                if self.rotator and current_proxy:
+                    self.rotator.mark_failed(current_proxy)
+                    current_proxy = self.rotator.get_proxy()
+                if attempt < config.MAX_RETRIES:
+                    await asyncio.sleep(calculate_backoff(attempt, config.BACKOFF_FACTOR))
+            except ScraperError as e:
+                last_error = e
+                if attempt < config.MAX_RETRIES:
+                    await asyncio.sleep(calculate_backoff(attempt, config.BACKOFF_FACTOR))
+            except Exception as e:
+                last_error = e
+                break
+        return ScraperResponse(status_code=0, text="", url=url, headers={}, cookies={},
+                               success=False, error_message=str(last_error))
 
 
 class BrowserClient:
