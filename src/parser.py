@@ -108,6 +108,33 @@ class ProductParser:
 
         return result
 
+    def parse_custom(self, html: str, url: str, fields: Dict[str, Dict[str, str]]) -> Dict[str, Any]:
+        """
+        Extract user-defined fields. `fields` maps a field name to
+        {"selector": <css>, "attr": <optional attribute>}. When "attr" is set,
+        the attribute value is returned (URLs resolved absolute); otherwise the
+        element's text is returned. Missing selectors yield None.
+        """
+        from urllib.parse import urljoin
+        tree = HTMLParser(html or "")
+        data: Dict[str, Any] = {}
+        for name, spec in (fields or {}).items():
+            selector = spec.get("selector")
+            attr = spec.get("attr")
+            value = None
+            if selector:
+                node = tree.css_first(selector)
+                if node is not None:
+                    if attr:
+                        raw = node.attributes.get(attr)
+                        if raw and attr in ("href", "src") and url:
+                            raw = urljoin(url, raw)
+                        value = raw
+                    else:
+                        value = self.clean_text(node.text())
+            data[name] = value
+        return {"url": url, "data": data}
+
     def _parse_json_ld(self, soup: BeautifulSoup) -> Dict[str, Any]:
         """Extracts Product Schema objects from script tags."""
         result = {}
