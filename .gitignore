@@ -1,0 +1,9 @@
+venv/
+__pycache__/
+*.pyc
+.userdata/
+exports/
+*.db
+.env
+node_modules/
+.next/

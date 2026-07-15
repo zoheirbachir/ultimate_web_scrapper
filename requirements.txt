@@ -1,0 +1,18 @@
+# ── Core stealth automation (Step 1) ─────────────────────────────────
+patchright>=1.40.0          # Undetected, patched Playwright — fixes the CDP
+                            # Runtime.enable leak that Cloudflare/DataDome detect.
+playwright>=1.40.0          # Base engine that patchright patches on top of.
+curl_cffi>=0.7.0            # TLS / JA3 / JA4 browser impersonation (HTTP fast-path).
+
+# ── HTML parsing (selector fallback; LLM layer arrives in Step 3) ─────
+selectolax>=0.3.17
+beautifulsoup4>=4.12.0
+
+# ── Data / math / utils ──────────────────────────────────────────────
+numpy>=1.24.0               # Bezier math in src/stealth.py (was implicit before).
+pandas>=2.0.0
+fake-useragent>=1.4.0
+
+# ── Testing ──────────────────────────────────────────────────────────
+pytest>=8.0.0
+pytest-asyncio>=0.23.0
