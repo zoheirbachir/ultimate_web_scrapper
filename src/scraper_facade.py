@@ -44,11 +44,18 @@ class Scraper:
                 self._browser_started = True
 
     async def _scrape_one(self, url: str, cfg: ScrapeConfig) -> Dict[str, Any]:
-        resp = await self.tls.fetch(url)
-        if not resp.success and cfg.use_browser_fallback:
-            logger.info(f"TLS path failed for {url}; falling back to browser.")
+        # Force browser client path for known React/Vue SPAs to let client-side content render
+        is_spa = any(domain in url.lower() for domain in ["kricar-dz.com", "ouedkniss.com"])
+        if is_spa:
+            logger.info(f"SPA detected for {url}; forcing browser path directly.")
             await self._ensure_browser()
             resp = await self.browser.fetch(url)
+        else:
+            resp = await self.tls.fetch(url)
+            if not resp.success and cfg.use_browser_fallback:
+                logger.info(f"TLS path failed for {url}; falling back to browser.")
+                await self._ensure_browser()
+                resp = await self.browser.fetch(url)
         if not resp.success:
             return {"url": url, "status": "failed", "error": resp.error_message, "data": None}
         parsed = self._parse(resp.text, url, cfg)

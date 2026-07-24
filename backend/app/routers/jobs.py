@@ -46,7 +46,29 @@ async def get_results(job_id: str, request: Request, user_id: str = Depends(get_
     store = _store(request)
     if not await store.get_job(job_id, user_id):
         raise HTTPException(status_code=404, detail="Job not found")
-    return await store.list_results(job_id, user_id)
+    db_results = await store.list_results(job_id, user_id)
+    
+    unpacked_results = []
+    for r in db_results:
+        # Convert model object/dict to dict to modify it
+        r_dict = dict(r) if not isinstance(r, dict) else r
+        data = r_dict.get("data")
+        if isinstance(data, dict) and "items" in data and isinstance(data["items"], list):
+            for idx, item in enumerate(data["items"], 1):
+                virtual_result = {
+                    "id": f"{r_dict.get('id')}-{idx}",
+                    "job_id": r_dict.get("job_id"),
+                    "url": item.get("url") or r_dict.get("url"),
+                    "data": item,
+                    "status": r_dict.get("status", "ok"),
+                    "error": r_dict.get("error"),
+                    "scraped_at": r_dict.get("scraped_at")
+                }
+                unpacked_results.append(virtual_result)
+        else:
+            unpacked_results.append(r_dict)
+            
+    return unpacked_results
 
 
 @router.post("/jobs/{job_id}/cancel", response_model=JobOut)
@@ -61,14 +83,21 @@ async def cancel_job(job_id: str, request: Request, user_id: str = Depends(get_c
 
 
 def _results_dataframe(results: List[dict]) -> pd.DataFrame:
-    """Flatten result rows into a table: url + status + each extracted data field."""
+    """Flatten result rows into a table: url + status + each extracted data field.
+    If the data dictionary contains a nested list of 'items', unpack each item as a separate row."""
     rows = []
     for r in results:
-        row = {"url": r.get("url"), "status": r.get("status")}
         data = r.get("data")
-        if isinstance(data, dict):
-            row.update(data)
-        rows.append(row)
+        if isinstance(data, dict) and "items" in data and isinstance(data["items"], list):
+            for item in data["items"]:
+                row = {"url": item.get("url") or r.get("url"), "status": r.get("status")}
+                row.update(item)
+                rows.append(row)
+        else:
+            row = {"url": r.get("url"), "status": r.get("status")}
+            if isinstance(data, dict):
+                row.update(data)
+            rows.append(row)
     return pd.DataFrame(rows)
 
 

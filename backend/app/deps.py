@@ -21,8 +21,16 @@ async def resolve_user_from_auth(authorization: str, store: Store, jwt_secret: s
         return prof["id"]
 
     try:
-        return verify_supabase_jwt(token, jwt_secret)
-    except Exception:
+        user_id = verify_supabase_jwt(token, jwt_secret)
+        print(f"[AUTH DIAGNOSTIC] Successfully verified token for user_id: {user_id}")
+        return user_id
+    except Exception as e:
+        import traceback
+        print(f"[AUTH DIAGNOSTIC] Token verification failed!")
+        print(f"  Token length: {len(token)}")
+        print(f"  Token prefix: '{token[:30]}...'")
+        print(f"  Error message: {str(e)}")
+        # print(traceback.format_exc())
         raise HTTPException(status_code=401, detail="Invalid or expired token")
 
 

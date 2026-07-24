@@ -14,7 +14,11 @@ def create_app(store, runner, settings) -> FastAPI:
     @asynccontextmanager
     async def lifespan(_app: FastAPI):
         # Reconcile any jobs left 'running' from a previous process back to 'queued'.
-        await store.reset_running_jobs()
+        try:
+            await store.reset_running_jobs()
+        except Exception as e:
+            import logging
+            logging.getLogger("UltimateScraper").warning("Could not reset running jobs on startup: %s", e)
         yield
 
     app = FastAPI(title="Ultimate Scraper API", version="1.0.0", lifespan=lifespan)
@@ -25,6 +29,7 @@ def create_app(store, runner, settings) -> FastAPI:
     app.add_middleware(
         CORSMiddleware,
         allow_origins=settings.cors_origins,
+        allow_origin_regex=r"http://(localhost|127\.0\.0\.1)(:\d+)?",
         allow_credentials=True,
         allow_methods=["*"],
         allow_headers=["*"],

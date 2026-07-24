@@ -9,3 +9,7 @@ exports/
 node_modules/
 .next/
 next-env.d.ts
+*.html
+state_script_*.js
+id_script_*.js
+trigger_test_*.py

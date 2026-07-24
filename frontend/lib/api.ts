@@ -1,6 +1,12 @@
 import { createClient } from "@/lib/supabase/client";
 
-const API_URL = process.env.NEXT_PUBLIC_API_URL || "http://localhost:8000";
+function getApiUrl(): string {
+  if (typeof window !== "undefined") {
+    // In browser, use local same-origin Next.js proxy (/api) to avoid cross-origin / VPN fetch failures
+    return "/api";
+  }
+  return process.env.NEXT_PUBLIC_API_URL || "http://localhost:8000";
+}
 
 export interface FieldSpec {
   selector: string;
@@ -17,11 +23,23 @@ export interface CreateJobPayload {
 }
 
 async function authHeader(): Promise<Record<string, string>> {
-  const supabase = createClient();
-  const {
-    data: { session },
-  } = await supabase.auth.getSession();
-  return session?.access_token ? { Authorization: `Bearer ${session.access_token}` } : {};
+  try {
+    const supabase = createClient();
+    let { data: { session } } = await supabase.auth.getSession();
+    
+    if (!session?.access_token) {
+      await supabase.auth.getUser();
+      const res = await supabase.auth.getSession();
+      session = res.data.session;
+    }
+
+    if (session?.access_token) {
+      return { Authorization: `Bearer ${session.access_token}` };
+    }
+  } catch (err) {
+    console.error("Error getting session:", err);
+  }
+  return {};
 }
 
 async function detail(res: Response): Promise<string> {
@@ -33,10 +51,23 @@ async function detail(res: Response): Promise<string> {
   }
 }
 
+async function safeFetch(path: string, init?: RequestInit): Promise<Response> {
+  const url = `${getApiUrl()}${path}`;
+  try {
+    return await fetch(url, init);
+  } catch (err) {
+    console.error(`Fetch error for ${url}:`, err);
+    throw new Error(
+      "Could not connect to backend server. Please make sure START_PLATFORM.bat is running."
+    );
+  }
+}
+
 export async function createJob(payload: CreateJobPayload) {
-  const res = await fetch(`${API_URL}/v1/jobs`, {
+  const headers = await authHeader();
+  const res = await safeFetch("/v1/jobs", {
     method: "POST",
-    headers: { "Content-Type": "application/json", ...(await authHeader()) },
+    headers: { "Content-Type": "application/json", ...headers },
     body: JSON.stringify(payload),
   });
   if (!res.ok) throw new Error(await detail(res));
@@ -44,17 +75,19 @@ export async function createJob(payload: CreateJobPayload) {
 }
 
 export async function cancelJob(jobId: string) {
-  const res = await fetch(`${API_URL}/v1/jobs/${jobId}/cancel`, {
+  const headers = await authHeader();
+  const res = await safeFetch(`/v1/jobs/${jobId}/cancel`, {
     method: "POST",
-    headers: { ...(await authHeader()) },
+    headers,
   });
   if (!res.ok) throw new Error(await detail(res));
   return res.json();
 }
 
 export async function downloadExport(jobId: string, format: "csv" | "json" | "xlsx") {
-  const res = await fetch(`${API_URL}/v1/jobs/${jobId}/export?format=${format}`, {
-    headers: { ...(await authHeader()) },
+  const headers = await authHeader();
+  const res = await safeFetch(`/v1/jobs/${jobId}/export?format=${format}`, {
+    headers,
   });
   if (!res.ok) throw new Error(await detail(res));
   const blob = await res.blob();
@@ -69,16 +102,18 @@ export async function downloadExport(jobId: string, format: "csv" | "json" | "xl
 }
 
 export async function rotateApiKey(): Promise<{ api_key: string; prefix: string }> {
-  const res = await fetch(`${API_URL}/v1/keys/rotate`, {
+  const headers = await authHeader();
+  const res = await safeFetch("/v1/keys/rotate", {
     method: "POST",
-    headers: { ...(await authHeader()) },
+    headers,
   });
   if (!res.ok) throw new Error(await detail(res));
   return res.json();
 }
 
 export async function getUsage(): Promise<{ usage_count: number }> {
-  const res = await fetch(`${API_URL}/v1/usage`, { headers: { ...(await authHeader()) } });
+  const headers = await authHeader();
+  const res = await safeFetch("/v1/usage", { headers });
   if (!res.ok) throw new Error(await detail(res));
   return res.json();
 }

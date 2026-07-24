@@ -41,6 +41,136 @@ class ProductParser:
         tree = HTMLParser(html)
         soup = BeautifulSoup(html, "html.parser")
         
+        # Check if the page is a search/browse list page that we can parse as a grid of items
+        grid_items = []
+        from urllib.parse import urljoin
+        
+        # 1. Kricar search grid detection
+        if "kricar-dz.com" in url.lower() and "search" in url.lower():
+            cards = soup.find_all("a", class_=lambda x: x and "card" in x)
+            for idx, card in enumerate(cards, 1):
+                try:
+                    title_node = card.find("h3")
+                    title = title_node.text.strip() if title_node else "Unknown"
+                    href = card.get("href", "")
+                    detail_url = urljoin(url, href) if href else url
+                    category_node = card.find("span", class_="badge")
+                    category = category_node.text.strip() if category_node else "Citadine"
+                    
+                    location = "Alger"
+                    location_p = card.find("p", class_=lambda x: x and "text-xs" in x and "text-gray-500" in x)
+                    if location_p:
+                        location = location_p.text.strip()
+                        
+                    img_node = card.find("img")
+                    img_src = img_node.get("src", "") if img_node else ""
+                    img_url = urljoin(url, img_src) if img_src else ""
+                    
+                    specs_container = card.find("div", class_=lambda x: x and "flex" in x and "items-center" in x and "gap-3" in x)
+                    seats, transmission, fuel = "5", "Manuelle", "Essence"
+                    if specs_container:
+                        spans = specs_container.find_all("span")
+                        if len(spans) >= 3:
+                            seats = spans[0].text.strip()
+                            transmission = spans[1].text.strip()
+                            fuel = spans[2].text.strip()
+                            
+                    price_node = card.find("span", class_=lambda x: x and "font-display" in x and "text-xl" in x)
+                    price_val = 0.0
+                    if price_node:
+                        try:
+                            price_val = float(price_node.text.strip().replace(",", ""))
+                        except Exception:
+                            pass
+                            
+                    grid_items.append({
+                        "url": detail_url,
+                        "title": title,
+                        "sku": href.split("/")[-1] if "/" in href else href,
+                        "price": price_val,
+                        "currency": "DZD",
+                        "brand": title.split(" ")[0],
+                        "description": f"Car Rental: {title} in {location} ({transmission}, {fuel})",
+                        "image_url": img_url,
+                        "in_stock": True,
+                        "specifications": {
+                            "Category": category,
+                            "Location": location,
+                            "Seats": seats,
+                            "Transmission": transmission,
+                            "Fuel": fuel,
+                            "Price Unit": "DA/jour"
+                        }
+                    })
+                except Exception:
+                    pass
+                    
+        # 2. Amazon browse grid detection
+        elif "amazon.fr" in url.lower() and (soup.find(attrs={"data-cy": "asin-faceout-container"}) or "node=" in url.lower()):
+            cards = soup.find_all(attrs={"data-cy": "asin-faceout-container"})
+            for idx, card in enumerate(cards, 1):
+                try:
+                    title_node = card.find("h2")
+                    title = title_node.text.strip() if title_node else "Unknown Product"
+                    link_node = card.find("a", class_=lambda c: c and "a-link-normal" in c)
+                    href = link_node.get("href", "") if link_node else ""
+                    detail_url = urljoin("https://www.amazon.fr/", href) if href else url
+                    img_node = card.find("img", class_="s-image")
+                    img_url = img_node.get("src", "") if img_node else ""
+                    
+                    price_node = card.find("span", class_="a-offscreen")
+                    price_text = price_node.text.strip() if price_node else "0"
+                    clean_price = price_text.replace("€", "").replace(" ", "").replace(",", ".").strip()
+                    price_val = 0.0
+                    try:
+                        price_val = float(clean_price)
+                    except Exception:
+                        pass
+                        
+                    rating_node = card.find("span", class_="a-icon-alt")
+                    rating = rating_node.text.strip() if rating_node else "No rating"
+                    
+                    asin = ""
+                    if "/dp/" in href:
+                        parts = href.split("/dp/")
+                        if len(parts) > 1:
+                            asin = parts[1].split("/")[0]
+                            
+                    grid_items.append({
+                        "url": detail_url,
+                        "title": title,
+                        "sku": asin if asin else f"AMZN-{idx}",
+                        "price": price_val,
+                        "currency": "EUR",
+                        "brand": "Amazon",
+                        "description": f"Amazon Product: {title} | Rating: {rating}",
+                        "image_url": img_url,
+                        "in_stock": True,
+                        "specifications": {
+                            "Rating": rating,
+                            "Price Visual": price_text,
+                            "ASIN": asin
+                        }
+                    })
+                except Exception:
+                    pass
+
+        if grid_items:
+            # If we found grid items, return them in the custom structure!
+            return {
+                "url": url,
+                "title": self.clean_text(soup.title.text if soup.title else "Scraped Grid Page"),
+                "sku": "GRID",
+                "price": None,
+                "currency": "USD",
+                "brand": "Grid",
+                "description": f"Auto-detected search/browse grid page. Extracted {len(grid_items)} items.",
+                "image_url": None,
+                "in_stock": True,
+                "specifications": {"Total Scraped Items": len(grid_items)},
+                "items": grid_items
+            }
+        
         # Attempt extracting JSON-LD first
         data = self._parse_json_ld(soup)
         

@@ -236,6 +236,11 @@ class BrowserClient:
             if status >= 500:
                 raise ScraperRequestError(f"Server Error status code: {status}")
 
+            # Allow client-side rendering (APIs/GraphQL) to execute for known SPA websites
+            if any(domain in url.lower() for domain in ["kricar-dz.com", "ouedkniss.com"]):
+                logger.info("SPA detected, waiting 6 seconds for client-side scripts to render...")
+                await page.wait_for_timeout(6000)
+
             content = await page.content()
 
             # Check bot challenge blocks

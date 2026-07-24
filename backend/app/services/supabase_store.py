@@ -91,7 +91,11 @@ class SupabaseStore:
             "increment_usage", {"p_user_id": user_id, "p_n": n}).execute())
 
     async def reset_running_jobs(self) -> int:
-        res = await self._run(lambda: self.client.table("jobs")
-                              .update({"status": "queued", "started_at": None})
-                              .eq("status", "running").execute())
-        return len(res.data or [])
+        try:
+            res = await self._run(lambda: self.client.table("jobs")
+                                  .update({"status": "queued", "started_at": None})
+                                  .eq("status", "running").execute())
+            return len(res.data or [])
+        except Exception as e:
+            logger.warning("Could not reset running jobs from Supabase: %s", e)
+            return 0

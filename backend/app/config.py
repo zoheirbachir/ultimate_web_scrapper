@@ -15,7 +15,7 @@ class Settings(BaseSettings):
     job_concurrency: int = 5
     job_rate_per_minute: float = 60.0
 
-    cors_origins: List[str] = ["http://localhost:3000"]
+    cors_origins: List[str] = ["http://localhost:3000", "http://127.0.0.1:3000", "http://localhost:8000"]
 
 
 def get_settings() -> Settings:
