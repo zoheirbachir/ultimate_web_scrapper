@@ -44,8 +44,18 @@ async function authHeader(): Promise<Record<string, string>> {
 
 async function detail(res: Response): Promise<string> {
   try {
-    const body = await res.json();
-    return body.detail || `Request failed (${res.status})`;
+    const text = await res.text();
+    try {
+      const body = JSON.parse(text);
+      if (typeof body.detail === "string") return body.detail;
+      if (typeof body.message === "string") return body.message;
+      return JSON.stringify(body);
+    } catch {
+      if (text.includes("502 Bad Gateway") || text.includes("503 Service") || text.includes("<html")) {
+        return `Backend server is spinning up on Render (${res.status}). Please wait ~30 seconds and try again.`;
+      }
+      return text.slice(0, 150) || `Request failed (${res.status})`;
+    }
   } catch {
     return `Request failed (${res.status})`;
   }
@@ -71,7 +81,12 @@ export async function createJob(payload: CreateJobPayload) {
     body: JSON.stringify(payload),
   });
   if (!res.ok) throw new Error(await detail(res));
-  return res.json();
+  const text = await res.text();
+  try {
+    return JSON.parse(text);
+  } catch {
+    throw new Error(`Server returned non-JSON response: ${text.slice(0, 100)}`);
+  }
 }
 
 export async function cancelJob(jobId: string) {
