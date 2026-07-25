@@ -124,20 +124,20 @@ def check_bot_challenges(
     html_lower = (html_content or "").lower()
     hdrs = {k.lower(): (v or "").lower() for k, v in (headers or {}).items()}
 
-    # 1. Cloudflare — header, then script host, then challenge title.
+    # 1. Cloudflare — explicit header or explicit challenge title with 403/503/429 status
     if hdrs.get("cf-mitigated") == "challenge":
         return _blocked("Cloudflare", "cf-mitigated: challenge header", url)
-    if any(m in html_lower for m in CLOUDFLARE_SCRIPT_MARKERS):
-        return _blocked("Cloudflare", "challenge-platform script present", url)
+        
     if any(m in html_lower for m in CLOUDFLARE_TITLE_MARKERS):
-        return _blocked("Cloudflare", "challenge page title", url)
+        if status_code in CHALLENGE_STATUS_CODES or "cf-browser-verification" in html_lower:
+            return _blocked("Cloudflare", "challenge page title", url)
 
-    # 2. DataDome — infrastructure hosts.
-    if any(m in html_lower for m in DATADOME_MARKERS):
+    # 2. DataDome — infrastructure hosts with challenge status.
+    if status_code in CHALLENGE_STATUS_CODES and any(m in html_lower for m in DATADOME_MARKERS):
         return _blocked("DataDome", "DataDome infrastructure host present", url)
 
-    # 3. Akamai — challenge path / cookie marker.
-    if any(m in html_lower for m in AKAMAI_MARKERS):
+    # 3. Akamai — challenge path / cookie marker with challenge status.
+    if status_code in CHALLENGE_STATUS_CODES and any(m in html_lower for m in AKAMAI_MARKERS):
         return _blocked("Akamai", "Akamai Bot Manager marker present", url)
 
     # 4. Generic CAPTCHA widgets — only when the response itself is a challenge status.
