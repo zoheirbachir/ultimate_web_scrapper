@@ -216,6 +216,8 @@ class BrowserClient:
         self.context: Optional[BrowserContext] = None
 
     async def start(self):
+        if self.context:
+            return
         logger.info("Initializing patchright persistent browser context...")
         self.playwright = await async_playwright().start()
         kwargs = build_persistent_context_kwargs(self.headless, self.proxy)
@@ -229,7 +231,7 @@ class BrowserClient:
         wait_until: str = "domcontentloaded",
         timeout: float = config.DEFAULT_TIMEOUT
     ) -> ScraperResponse:
-        if not self.browser or not self.context:
+        if not self.context:
             await self.start()
 
         logger.info(f"Browser Mode -> Navigating to: {url}")

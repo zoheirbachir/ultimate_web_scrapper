@@ -30,6 +30,18 @@ export default function JobDetailPage() {
       if (mounted && data) setJob(data as Job);
     }
     async function loadResults() {
+      try {
+        const res = await fetch(`/api/v1/jobs/${jobId}/results`);
+        if (res.ok) {
+          const data = await res.json();
+          if (mounted && Array.isArray(data) && data.length > 0) {
+            setResults(data as ScrapeResult[]);
+            return;
+          }
+        }
+      } catch (e) {
+        // fallback
+      }
       const { data } = await supabase
         .from("results")
         .select("*")
