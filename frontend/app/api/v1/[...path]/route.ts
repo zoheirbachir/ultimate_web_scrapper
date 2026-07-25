@@ -1,7 +1,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import { createClient } from "@/lib/supabase/server";
 
-const BACKEND_URL = "http://localhost:8000";
+const BACKEND_URL = (process.env.NEXT_PUBLIC_API_URL || process.env.BACKEND_URL || "http://localhost:8000").replace(/\/$/, "");
 
 async function proxyRequest(request: NextRequest, { params }: { params: Promise<{ path: string[] }> }) {
   const resolvedParams = await params;
