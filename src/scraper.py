@@ -174,16 +174,26 @@ class TLSClient:
 
 def build_persistent_context_kwargs(headless: bool, proxy: Optional[str] = None) -> Dict[str, Any]:
     """Assemble launch_persistent_context kwargs from stealth config (pure function)."""
+    import os, sys, tempfile
+    is_cloud_linux = sys.platform != "win32" or bool(os.environ.get("RENDER") or os.environ.get("PORT"))
+
+    user_dir = tempfile.mkdtemp(prefix="pw_userdata_") if is_cloud_linux else config.USER_DATA_DIR
+    launch_headless = True if is_cloud_linux else headless
+    launch_channel = None if is_cloud_linux else config.BROWSER_CHANNEL
+    launch_args = ["--no-sandbox", "--disable-setuid-sandbox", "--disable-dev-shm-usage"] if is_cloud_linux else list(config.BROWSER_LAUNCH_ARGS)
+
     kwargs: Dict[str, Any] = {
-        "user_data_dir": config.USER_DATA_DIR,
-        "channel": config.BROWSER_CHANNEL,
-        "headless": headless,
+        "user_data_dir": user_dir,
+        "headless": launch_headless,
         "locale": config.PLAYWRIGHT_LOCALE,
         "timezone_id": config.PLAYWRIGHT_TIMEZONE,
         "color_scheme": config.PLAYWRIGHT_COLOR_SCHEME,
         "viewport": config.PLAYWRIGHT_VIEWPORT,
-        "args": list(config.BROWSER_LAUNCH_ARGS),   # deliberately empty
+        "args": launch_args,
     }
+    if launch_channel:
+        kwargs["channel"] = launch_channel
+
     if proxy:
         from src.proxies import parse_to_playwright
         pw_proxy = parse_to_playwright(proxy)
