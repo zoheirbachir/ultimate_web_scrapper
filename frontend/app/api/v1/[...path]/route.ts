@@ -38,6 +38,7 @@ async function proxyRequest(request: NextRequest, { params }: { params: Promise<
 
     const resHeaders = new Headers(backendRes.headers);
     resHeaders.delete("content-encoding");
+    resHeaders.delete("content-length");
 
     return new NextResponse(data, {
       status: backendRes.status,
