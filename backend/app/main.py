@@ -19,7 +19,26 @@ def create_app(store, runner, settings) -> FastAPI:
         except Exception as e:
             import logging
             logging.getLogger("UltimateScraper").warning("Could not reset running jobs on startup: %s", e)
+
+        # Background worker loop to pick up any queued jobs automatically
+        async def poll_queued_jobs():
+            while True:
+                try:
+                    await asyncio.sleep(3)
+                    if hasattr(store, "list_queued_jobs"):
+                        queued = await store.list_queued_jobs()
+                        for job in queued:
+                            runner.submit(job["id"], job["user_id"])
+                except asyncio.CancelledError:
+                    break
+                except Exception as e:
+                    import logging
+                    logging.getLogger("UltimateScraper").warning("Queue poller error: %s", e)
+
+        import asyncio
+        poller_task = asyncio.create_task(poll_queued_jobs())
         yield
+        poller_task.cancel()
 
     app = FastAPI(title="Ultimate Scraper API", version="1.0.0", lifespan=lifespan)
     app.state.store = store

@@ -38,6 +38,11 @@ class SupabaseStore:
                               .eq("user_id", user_id).order("created_at", desc=True).execute())
         return res.data or []
 
+    async def list_queued_jobs(self) -> List[Dict[str, Any]]:
+        res = await self._run(lambda: self.client.table("jobs").select("*")
+                              .eq("status", "queued").order("created_at", desc=False).limit(10).execute())
+        return res.data or []
+
     async def set_job_status(self, job_id: str, status: str, error: Optional[str] = None,
                              started: bool = False, finished: bool = False) -> None:
         patch: Dict[str, Any] = {"status": status}
