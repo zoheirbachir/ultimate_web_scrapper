@@ -28,10 +28,17 @@ class JobRunner:
 
     async def _run(self, job_id: str, user_id: str) -> None:
         async with self._sem:
+            if hasattr(self.store, "claim_job"):
+                claimed = await self.store.claim_job(job_id)
+                if not claimed:
+                    return
+            else:
+                job = await self.store.get_job(job_id, user_id)
+                if not job or job["status"] == "canceled":
+                    return
+                await self.store.set_job_status(job_id, "running", started=True)
+
             job = await self.store.get_job(job_id, user_id)
-            if not job or job["status"] == "canceled":
-                return
-            await self.store.set_job_status(job_id, "running", started=True)
 
             cfg = job["config"]
             scraper = self.scraper_factory()

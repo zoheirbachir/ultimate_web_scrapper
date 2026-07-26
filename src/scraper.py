@@ -219,10 +219,23 @@ class BrowserClient:
         if self.context:
             return
         logger.info("Initializing patchright persistent browser context...")
-        self.playwright = await async_playwright().start()
-        kwargs = build_persistent_context_kwargs(self.headless, self.proxy)
-        self.context = await self.playwright.chromium.launch_persistent_context(**kwargs)
-        self.browser = self.context.browser  # may be None for persistent contexts
+        try:
+            self.playwright = await async_playwright().start()
+            kwargs = build_persistent_context_kwargs(self.headless, self.proxy)
+            self.context = await self.playwright.chromium.launch_persistent_context(**kwargs)
+            self.browser = self.context.browser  # may be None for persistent contexts
+        except Exception as e:
+            if "Executable doesn't exist" in str(e) or "patchright install" in str(e):
+                logger.warning("Patchright browser binary missing; auto-installing patchright chromium...")
+                import subprocess, sys
+                subprocess.run([sys.executable, "-m", "patchright", "install", "chromium"], check=True)
+                if not self.playwright:
+                    self.playwright = await async_playwright().start()
+                kwargs = build_persistent_context_kwargs(self.headless, self.proxy)
+                self.context = await self.playwright.chromium.launch_persistent_context(**kwargs)
+                self.browser = self.context.browser
+            else:
+                raise e
 
     @retry_async(max_retries=config.MAX_RETRIES, exceptions=(ScraperError,), base_delay=config.BACKOFF_FACTOR)
     async def _fetch_raw(

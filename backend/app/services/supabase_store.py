@@ -43,6 +43,13 @@ class SupabaseStore:
                               .eq("status", "queued").order("created_at", desc=False).limit(10).execute())
         return res.data or []
 
+    async def claim_job(self, job_id: str) -> bool:
+        """Atomically claim a queued job so only one worker process executes it."""
+        res = await self._run(lambda: self.client.table("jobs")
+                              .update({"status": "running", "started_at": _now()})
+                              .eq("id", job_id).eq("status", "queued").execute())
+        return len(res.data or []) > 0
+
     async def set_job_status(self, job_id: str, status: str, error: Optional[str] = None,
                              started: bool = False, finished: bool = False) -> None:
         patch: Dict[str, Any] = {"status": status}
